@@ -77,8 +77,7 @@ jobs:
             --build-arg TARGETARCH="amd64" \ 
             -f ./crd.Dockerfile \
             --label org.opencontainers.image.revision=${{ github.sha }} \
-            -t ${{ steps.prepare.outputs.crdref }}_${platform} \
-            ./charts/ratify/crds
+            -t ${{ steps.prepare.outputs.crdref }}_${platform} ./charts/ratify/crds
           done
 
       - name: docker login
