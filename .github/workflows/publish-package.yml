@@ -75,7 +75,8 @@ jobs:
           docker build --build-arg KUBE_VERSION="1.25.4" \
             --build-arg TARGETOS="linux" \  
             --build-arg TARGETARCH="amd64" \ 
-            -f crd.Dockerfile --label org.opencontainers.image.revision=${{ github.sha }} \
+            -f ./crd.Dockerfile \
+            --label org.opencontainers.image.revision=${{ github.sha }} \
             -t ${{ steps.prepare.outputs.crdref }}_${platform} \
             ./charts/ratify/crds
           done
