@@ -13,12 +13,14 @@ permissions: read-all
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      platforms: amd64,arm64
     permissions:
       packages: write
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9
+        uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9  
       - name: prepare
         id: prepare
         run: |
@@ -42,30 +44,92 @@ jobs:
           echo ::set-output name=ref::${REPOSITORY}:${VERSION}
           echo ::set-output name=baseref::${REPOSITORYBASE}:${VERSION}
           echo ::set-output name=crdref::${REPOSITORYCRD}:${VERSION}
+
       - name: docker build ratify base
         run: |
-          docker build -f ./httpserver/Dockerfile --label org.opencontainers.image.revision=${{ github.sha }} -t ${{ steps.prepare.outputs.baseref }} .
+          IFS=',' read -ra platformArray <<< "$platforms"
+          for platform in "${platformArray[@]}"; do
+            docker build -f ./httpserver/Dockerfile \
+              --build-arg TARGETARCH="${platform}" \
+              --label org.opencontainers.image.revision=${{ github.sha }} \
+              -t ${{ steps.prepare.outputs.baseref }}_${platform} \
+              .
+          done
+
       - name: docker build ratify with plugin
         run: |
-          docker build -f ./httpserver/Dockerfile --build-arg build_cosign=true --build-arg build_sbom=true --build-arg build_licensechecker=true --build-arg build_schemavalidator=true --label org.opencontainers.image.revision=${{ github.sha }} -t ${{ steps.prepare.outputs.ref }} .
+          IFS=',' read -ra platformArray <<< "$platforms"
+          for platform in "${platformArray[@]}"; do
+          docker build -f ./httpserver/Dockerfile \
+            --build-arg build_cosign=true \
+            --build-arg build_sbom=true \
+            --build-arg TARGETARCH="${platform}" \
+            --build-arg build_licensechecker=true \
+            --build-arg build_schemavalidator=true \
+            --label org.opencontainers.image.revision=${{ github.sha }} \
+            -t ${{ steps.prepare.outputs.ref }}_${platform} .
+          done
+
       - name: docker build ratify-crds
         run: |
-          docker build --build-arg KUBE_VERSION="1.25.4" --build-arg TARGETOS="linux" --build-arg TARGETARCH="amd64" -f crd.Dockerfile --label org.opencontainers.image.revision=${{ github.sha }} -t ${{ steps.prepare.outputs.crdref }} ./charts/ratify/crds
+          IFS=',' read -ra platformArray <<< "$platforms"
+          for platform in "${platformArray[@]}"; do
+          docker build --build-arg KUBE_VERSION="1.25.4" \
+            --build-arg TARGETOS="linux" \  
+            --build-arg TARGETARCH="amd64" \ 
+            -f crd.Dockerfile --label org.opencontainers.image.revision=${{ github.sha }} \
+            -t ${{ steps.prepare.outputs.crdref }}_${platform} \
+            ./charts/ratify/crds
+          done
+
       - name: docker login
         uses: docker/login-action@465a07811f14bebb1938fbed4728c6a1ff8901fc # v2.2.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: docker push ratify base
         run: |
-          docker push ${{ steps.prepare.outputs.baseref }}
+          IFS=',' read -ra platformArray <<< "$platforms"
+          for platform in "${platformArray[@]}"; do        
+            docker push ${{ steps.prepare.outputs.baseref }}_${platform}
+          done
+
+      - name: docker manifest ratify base
+        run: |
+          docker manifest create ${{ steps.prepare.outputs.baseref }} \
+          --amend ${{ steps.prepare.outputs.baseref }}_arm64 \
+          --amend ${{ steps.prepare.outputs.baseref }}_amd64 &&\
+          docker manifest push --purge ${{ steps.prepare.outputs.baseref }}
+
       - name: docker push ratify with plugin
         run: |
-          docker push ${{ steps.prepare.outputs.ref }}
+          IFS=',' read -ra platformArray <<< "$platforms"
+          for platform in "${platformArray[@]}"; do            
+            docker push ${{ steps.prepare.outputs.ref }}_${platform}
+          done
+
+      - name: docker manifest ratify with plugin
+        run: |
+          docker manifest create ${{ steps.prepare.outputs.ref }} \
+          --amend ${{ steps.prepare.outputs.ref }}_arm64 \
+          --amend ${{ steps.prepare.outputs.ref }}_amd64 &&\
+          docker manifest push --purge ${{ steps.prepare.outputs.ref }}
+
       - name: docker push ratify-crds
         run: |
-          docker push ${{ steps.prepare.outputs.crdref }}
+          IFS=',' read -ra platformArray <<< "$platforms"
+          for platform in "${platformArray[@]}"; do               
+            docker push ${{ steps.prepare.outputs.crdref }}_${platform}
+
+      - name: docker manifest ratify-crds
+        run: |
+          docker manifest create ${{ steps.prepare.outputs.crdref }} \
+          --amend ${{ steps.prepare.outputs.crdref }}_arm64 \
+          --amend ${{ steps.prepare.outputs.crdref }}_amd64 &&\
+          docker manifest push --purge ${{ steps.prepare.outputs.crdref }}            
+
       - name: clear
         if: always()
         run: |
